@@ -15,6 +15,7 @@ import type {
 import pg from 'pg';
 import type { Pool, PoolClient } from 'pg';
 
+import { connectWithClientErrorHandler } from '../shared/client-error-guard';
 import { PostgresStore } from './index';
 
 export type PgFactoryStorageConfig =
@@ -415,7 +416,7 @@ class PgFactoryStorageOps implements FactoryStorageOps {
     if (this.#transactionClient) return run(this.#transactionClient);
 
     const pool = this.#queryable as Pool;
-    const client = await pool.connect();
+    const client = await connectWithClientErrorHandler(pool);
     try {
       await client.query('BEGIN');
       try {
@@ -459,6 +460,16 @@ export class PgFactoryStorage extends FactoryStorage {
     } else {
       this.#pool = new pg.Pool({ connectionString: config.connectionString });
       this.#ownsPool = true;
+      // pg emits 'error' on the pool when an idle client's connection drops.
+      // Without a listener Node escalates it to an uncaughtException and
+      // crashes the process. Only pools this class creates get the listener.
+      this.#pool.on('error', err => {
+        console.warn(
+          `PgFactoryStorage: idle pool client error (pool discards the client and reconnects on next checkout): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
     }
     this.ops = new PgFactoryStorageOps(this.#pool, this.#schemas);
   }
@@ -480,7 +491,7 @@ export class PgFactoryStorage extends FactoryStorage {
   }
 
   async withTransaction<T>(fn: (ops: FactoryStorageOps) => Promise<T>): Promise<T> {
-    const client = await this.#pool.connect();
+    const client = await connectWithClientErrorHandler(this.#pool);
     try {
       await client.query('BEGIN');
       try {
@@ -523,7 +534,7 @@ export class PgFactoryStorage extends FactoryStorage {
    */
   async withDistributedLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const [k1, k2] = hashAdvisoryLockKey(key);
-    const client = await this.#pool.connect();
+    const client = await connectWithClientErrorHandler(this.#pool);
     try {
       await client.query('BEGIN');
       // Blocks until no other transaction holds this advisory key.

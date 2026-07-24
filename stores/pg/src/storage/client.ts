@@ -1,4 +1,5 @@
 import type { Pool, PoolClient, QueryResult } from 'pg';
+import { connectWithClientErrorHandler } from '../shared/client-error-guard';
 
 // Re-export pg types for consumers
 export type { Pool, PoolClient, QueryResult } from 'pg';
@@ -105,7 +106,7 @@ export class PoolAdapter implements DbClient {
   constructor(public readonly $pool: Pool) {}
 
   connect(): Promise<PoolClient> {
-    return this.$pool.connect();
+    return connectWithClientErrorHandler(this.$pool);
   }
 
   async none(query: string, values?: QueryValues): Promise<null> {
@@ -157,7 +158,7 @@ export class PoolAdapter implements DbClient {
   }
 
   async tx<T>(callback: (t: TxClient) => Promise<T>): Promise<T> {
-    const client = await this.$pool.connect();
+    const client = await connectWithClientErrorHandler(this.$pool);
     try {
       await client.query('BEGIN');
       const txClient = new TransactionClient(client);
