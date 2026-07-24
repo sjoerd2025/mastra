@@ -191,6 +191,64 @@ Function steps don't create `judge` entries. Usage in this record belongs to the
 
 Use Mastra metrics to query aggregate usage, latency, and estimated cost across scorer runs. The `judge` record describes one scorer run and doesn't query metrics or traces.
 
+### Failed runs
+
+A failed scorer stage still rejects the `.run()` promise. Catch `ScorerRunError` to inspect completed stages and any results they produced:
+
+```typescript
+import { ScorerRunError } from '@mastra/core/evals'
+
+try {
+  const result = await scorer.run({ input, output })
+  console.log(result.score)
+} catch (error) {
+  if (error instanceof ScorerRunError) {
+    console.log(error.failedStep)
+    console.log(error.completedSteps)
+    console.log(error.result?.score)
+    console.log(error.failedJudgeExecution)
+  }
+
+  throw error
+}
+```
+
+`ScorerRunError` exposes these properties:
+
+<PropertiesTable
+  content={[
+  {
+    name: 'failedStep',
+    type: 'ScorerStepName',
+    description: 'The scorer stage that failed.',
+  },
+  {
+    name: 'completedSteps',
+    type: 'ScorerStepName[]',
+    description: 'The scorer stages that completed before the failure, in execution order.',
+  },
+  {
+    name: 'result',
+    type: 'ScorerRunResultSnapshot | undefined',
+    description:
+      'Outputs from completed scorer stages. This property is omitted when no scorer result field was produced.',
+  },
+  {
+    name: 'failedJudgeExecution',
+    type: 'ScorerFailedJudgeExecution | undefined',
+    description: 'Evidence from the failed prompt-based stage, when a judge invocation started.',
+  },
+]}
+/>
+
+The `result` snapshot contains only completed stage outputs. For example, if `generateReason` fails after `generateScore` returns `0`, `error.result.score` is `0`. The run remains failed.
+
+`failedJudgeExecution` is separate from successful executions in `error.result.judge`. It can include the failed stage's prompt, model, provider, completed usage, attempt count, completed model-call count, duration, finish reason, raw output, and normalized error summary. Unavailable fields are omitted. Failed usage isn't added to successful judge usage.
+
+`JSON.stringify(error)` uses the standard `MastraError` serialization and omits `result` and `failedJudgeExecution`. Read these properties explicitly when you need scorer artifacts or raw failed output.
+
+An in-memory experiment result can keep a completed score or reason from a failed scorer along with `error`, `failedStep`, and `completedSteps`. The scorer is still treated as failed, and a recovered score isn't written to legacy successful-score storage.
+
 ## Step execution flow
 
 When you call `.run()`, the MastraScorer executes the defined steps in this order:
